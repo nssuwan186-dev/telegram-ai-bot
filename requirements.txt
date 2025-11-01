@@ -2,3 +2,5 @@ google-generativeai
 pytesseract
 Pillow
 python-telegram-bot
+fastapi
+uvicorn[standard]

@@ -1,4 +1,4 @@
-"""Hotel OS Telegram bot with AI assistant, payment slip verification, and expense tracking."""
+"""Hotel OS Telegram bot with AI assistant, payment slip verification, and expense tracking (Webhook version)."""
 
 from __future__ import annotations
 
@@ -19,6 +19,8 @@ from typing import Dict, Optional, Sequence
 
 import google.generativeai as genai
 import pytesseract
+import uvicorn
+from fastapi import FastAPI, Request, Response
 from PIL import Image
 from telegram import KeyboardButton, ReplyKeyboardMarkup, Update, WebAppInfo
 from telegram.ext import (
@@ -29,22 +31,24 @@ from telegram.ext import (
     filters,
 )
 
+# --------------------------------------------------------------------------
+# FastAPI App Initialization
+# --------------------------------------------------------------------------
+app = FastAPI()
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------
 # Logging configuration
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO,
 )
 logging.getLogger("httpx").setLevel(logging.WARNING)
-
 logger = logging.getLogger(__name__)
 
-
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------
 # Dataclasses and settings
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------
 @dataclass
 class Settings:
     telegram_bot_token: str
@@ -62,6 +66,7 @@ class Settings:
     ocr_language: str
     tesseract_cmd: Optional[str]
     amount_tolerance: Decimal
+    webhook_url: Optional[str]
 
 
 @dataclass
@@ -72,9 +77,9 @@ class SlipExtractionResult:
     payment_time: Optional[time]
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------
 # Utility helpers
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------
 def _require_env(name: str) -> str:
     value = os.getenv(name)
     if not value:
@@ -89,12 +94,10 @@ def _load_blueprint(path: Path) -> str:
         raise RuntimeError(
             f"PMS blueprint file not found at {path}. Set PMS_BLUEPRINT_PATH to a valid file."
         ) from exc
-
     if not content:
         raise RuntimeError(
             "PMS blueprint file is empty. Ensure the document contains the blueprint content.",
         )
-
     return content
 
 
@@ -105,7 +108,7 @@ def load_settings() -> Settings:
     authorized_user_raw = _require_env("TELEGRAM_USER_ID")
     try:
         authorized_user_id = int(authorized_user_raw)
-    except ValueError as exc:  # noqa: B904
+    except ValueError as exc:
         raise RuntimeError("TELEGRAM_USER_ID must be an integer") from exc
 
     gemini_model = os.getenv("GEMINI_MODEL", "gemini-pro")
@@ -132,14 +135,16 @@ def load_settings() -> Settings:
     webapp_port = int(os.getenv("WEBAPP_PORT", "8080"))
     serve_webapp = os.getenv("SERVE_WEBAPP", "true").lower() == "true"
 
-    ocr_language = os.getenv("OCR_LANGUAGE", "eng")
+    ocr_language = os.getenv("OCR_LANGUAGE", "eng,tha")
     tesseract_cmd = os.getenv("TESSERACT_CMD")
 
     tolerance_raw = os.getenv("AMOUNT_TOLERANCE", "1.00")
     try:
         amount_tolerance = Decimal(tolerance_raw)
-    except InvalidOperation as exc:  # noqa: B904
+    except InvalidOperation as exc:
         raise RuntimeError("AMOUNT_TOLERANCE must be a decimal number") from exc
+
+    webhook_url = os.getenv("WEBHOOK_URL")
 
     return Settings(
         telegram_bot_token=telegram_bot_token,
@@ -157,6 +162,7 @@ def load_settings() -> Settings:
         ocr_language=ocr_language,
         tesseract_cmd=tesseract_cmd,
         amount_tolerance=amount_tolerance,
+        webhook_url=webhook_url,
     )
 
 
@@ -164,12 +170,10 @@ def configure_ocr(settings: Settings) -> None:
     if settings.tesseract_cmd:
         pytesseract.pytesseract.tesseract_cmd = settings.tesseract_cmd
 
-
 def initialize_directories(settings: Settings) -> None:
     settings.database_path.parent.mkdir(parents=True, exist_ok=True)
     settings.slip_storage_dir.mkdir(parents=True, exist_ok=True)
     settings.webapp_static_dir.mkdir(parents=True, exist_ok=True)
-
 
 def initialize_database(settings: Settings) -> None:
     def _init() -> None:
@@ -217,7 +221,6 @@ def initialize_database(settings: Settings) -> None:
 
     _init()
 
-
 def start_static_server(settings: Settings) -> Optional[Thread]:
     if not settings.serve_webapp:
         logger.info("Skipping internal web app server start (SERVE_WEBAPP=false)")
@@ -238,7 +241,7 @@ def start_static_server(settings: Settings) -> Optional[Thread]:
         )
         try:
             server.serve_forever()
-        except Exception:  # pragma: no cover - background server errors are logged
+        except Exception:
             logger.exception("Web app server encountered an error")
 
     thread = Thread(target=_serve, name="webapp-server", daemon=True)
@@ -246,9 +249,9 @@ def start_static_server(settings: Settings) -> Optional[Thread]:
     return thread
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------
 # Authorization helpers
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------
 def _is_authorized(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     user = update.effective_user
     if user is None:
@@ -262,9 +265,9 @@ async def _notify_unauthorized(update: Update) -> None:
         await update.message.reply_text("คุณไม่มีสิทธิ์ใช้งานบอทนี้ค่ะ")
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------
 # Command handlers
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not _is_authorized(update, context):
         await _notify_unauthorized(update)
@@ -317,7 +320,7 @@ async def menu_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await update.message.reply_text(
             "เปิดเมนูหลักได้เลยครับ",
             reply_markup=ReplyKeyboardMarkup(
-                [[
+                [[ 
                     KeyboardButton(
                         text="🛎️ เปิดระบบบริหารโรงแรม",
                         web_app=WebAppInfo(url=settings.webapp_base_url),
@@ -366,9 +369,9 @@ async def pms_blueprint(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         await update.message.reply_text(chunk)
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------
 # AI conversation fallback
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------
 async def handle_ai_conversation(text: str, model: genai.GenerativeModel) -> str:
     try:
         response = await model.generate_content_async(text)
@@ -398,9 +401,9 @@ async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(ai_response)
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------
 # Web App data handling
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------
 async def web_app_data_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not _is_authorized(update, context):
         await _notify_unauthorized(update)
@@ -596,9 +599,9 @@ async def process_expense_entry(
     )
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------
 # OCR and verification helpers
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------
 def extract_slip_information(path: Path, settings: Settings) -> SlipExtractionResult:
     try:
         image = Image.open(path)
@@ -639,20 +642,18 @@ def _extract_amount(text: str) -> Optional[Decimal]:
             continue
     return None
 
-
 def _extract_date(text: str) -> Optional[date]:
     date_pattern = re.compile(r"(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})")
     match = date_pattern.search(text)
     if not match:
         return None
     candidate = match.group(1)
-    for fmt in ("%d/%m/%Y", "%d-%m-%Y", "%d/%m/%y", "%d-%m-%y"):
+    for fmt in ("%d/%m/%Y", "%d-%m-%Y", "%d/%m/%y", "%d-%m/%y"):
         try:
             return datetime.strptime(candidate, fmt).date()
         except ValueError:
             continue
     return None
-
 
 def _extract_time(text: str) -> Optional[time]:
     time_pattern = re.compile(r"(\d{1,2}[:.]\d{2}(?::\d{2})?)")
@@ -666,7 +667,6 @@ def _extract_time(text: str) -> Optional[time]:
         except ValueError:
             continue
     return None
-
 
 def verify_booking_amount(
     settings: Settings,
@@ -702,9 +702,9 @@ def verify_booking_amount(
     return result
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------
 # Telegram utility helpers
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------
 def _chunk_for_telegram(text: str, limit: int = 3500) -> Sequence[str]:
     paragraphs = text.split("\n\n")
     chunks: list[str] = []
@@ -740,18 +740,20 @@ def _chunk_for_telegram(text: str, limit: int = 3500) -> Sequence[str]:
     return chunks
 
 
-# ---------------------------------------------------------------------------
-# Main entry point
-# ---------------------------------------------------------------------------
-def main() -> None:
+# --------------------------------------------------------------------------
+# Webhook setup and main entry point
+# --------------------------------------------------------------------------
+async def setup_bot() -> Application:
+    """Initialize the bot and its handlers."""
     settings = load_settings()
     configure_ocr(settings)
     initialize_directories(settings)
     initialize_database(settings)
 
-    webapp_server_thread = start_static_server(settings)
-    if webapp_server_thread:
-        logger.info("Web app server thread started: %s", webapp_server_thread.name)
+    # Note: The static server is less relevant for a pure webhook setup on Cloud Run,
+    # but can be useful for local testing. It's disabled by default on production.
+    if os.getenv("ENV", "production").lower() == "development":
+        start_static_server(settings)
 
     genai.configure(api_key=settings.gemini_api_key)
     gemini_model = genai.GenerativeModel(settings.gemini_model)
@@ -778,10 +780,59 @@ def main() -> None:
     application.add_handler(MessageHandler(filters.StatusUpdate.WEB_APP_DATA, web_app_data_handler))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
 
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
+    return application
+
+
+@app.on_event("startup")
+async def startup_event():
+    """On startup, initialize the bot and set the webhook."""
+    application = await setup_bot()
+    settings: Settings = application.bot_data["settings"]
+
+    if not settings.webhook_url:
+        logger.warning("WEBHOOK_URL is not set, skipping webhook setup.")
+        return
+
+    await application.bot.set_webhook(
+        url=f"{settings.webhook_url}/webhook/{settings.telegram_bot_token}"
+    )
+    
+    # Store the application instance in the FastAPI app state
+    app.state.application = application
+    logger.info("Bot application initialized and webhook is set.")
+
+
+@app.post("/webhook/{token}")
+async def webhook_handler(request: Request, token: str):
+    """Handle incoming Telegram updates."""
+    application: Application = app.state.application
+    
+    # Check if the token is correct
+    if token != application.bot_data["settings"].telegram_bot_token:
+        return Response(status_code=403)
+
+    try:
+        update_data = await request.json()
+        update = Update.de_json(data=update_data, bot=application.bot)
+        await application.process_update(update)
+        return Response(status_code=200)
+    except json.JSONDecodeError:
+        logger.error("Failed to decode JSON from webhook request")
+        return Response(status_code=400)
+    except Exception:
+        logger.exception("Error processing webhook update")
+        return Response(status_code=500)
+
+
+@app.get("/")
+def health_check():
+    """A simple health check endpoint."""
+    return {"status": "ok"}
 
 
 if __name__ == "__main__":
-    main()
-
-
+    # This part is for local development and won't be used by Cloud Run.
+    # Cloud Run uses the `uvicorn` command in the Dockerfile.
+    settings = load_settings()
+    port = int(os.getenv("PORT", 8080))
+    uvicorn.run(app, host="0.0.0.0", port=port)
