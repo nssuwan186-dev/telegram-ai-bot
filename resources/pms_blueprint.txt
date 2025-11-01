@@ -1,0 +1,3 @@
+# This is a placeholder for the PMS blueprint.
+# The original pms_blueprint.docx could not be read.
+# Please add your PMS blueprint content here.

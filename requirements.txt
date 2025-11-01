@@ -1,1 +1,4 @@
-python-telegram-bot==20.8
+google-generativeai
+pytesseract
+Pillow
+python-telegram-bot

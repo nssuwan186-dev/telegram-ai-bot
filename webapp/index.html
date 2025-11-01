@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hotel OS Bot</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;600&family=Prompt:wght@400;600&display=swap" rel="stylesheet">
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+</head>
+<body class="webapp">
+
+    <header class="webapp__header">
+        <div class="brand">
+            <span class="brand__icon">🏨</span>
+            <div>
+                <h1 class="brand__title">Hotel OS</h1>
+                <p class="brand__subtitle">ระบบบริหารจัดการโรงแรม</p>
+            </div>
+        </div>
+    </header>
+
+    <div id="statusBar" class="status" hidden>
+        <span id="statusText"></span>
+    </div>
+
+    <main class="webapp__content">
+        <!-- Dashboard Panel -->
+        <div id="panel-dashboard" class="panel is-visible">
+            <div class="panel__header">
+                <h2>ภาพรวมระบบ</h2>
+                <p>เลือกรายการที่ต้องการจัดการ</p>
+            </div>
+            <div class="cards">
+                <div class="card" data-open-section="slip">
+                    <h3>ตรวจสอบสลิป</h3>
+                    <p>อัปโหลดและยืนยันสลิปการชำระเงินของลูกค้า</p>
+                    <span class="card__action">ดำเนินการ &rarr;</span>
+                </div>
+                <div class="card" data-open-section="expense">
+                    <h3>บันทึกค่าใช้จ่าย</h3>
+                    <p>บันทึกรายจ่ายต่างๆ ของโรงแรม</p>
+                    <span class="card__action">ดำเนินการ &rarr;</span>
+                </div>
+                 <div class="card card--placeholder">
+                    <h3>รายงาน (เร็วๆ นี้)</h3>
+                    <p>ดูสรุปและรายงานผลประกอบการ</p>
+                    <span class="card__action card__action--disabled">เร็วๆ นี้</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Slip Verification Panel -->
+        <div id="panel-slip" class="panel">
+            <div class="panel__header">
+                <h2>ตรวจสอบสลิปชำระเงิน</h2>
+                <p>กรอกข้อมูลและอัปโหลดสลิปเพื่อตรวจสอบกับระบบ</p>
+            </div>
+            <form id="slipForm" class="form">
+                <div class="form__field">
+                    <span>หมายเลขการจอง (Booking ID)</span>
+                    <input type="text" id="bookingId" name="bookingId" placeholder="เช่น BK-12345" required>
+                </div>
+                <div class="form__field">
+                    <span>บันทึกอ้างอิง (ถ้ามี)</span>
+                    <input type="text" id="reference" name="reference" placeholder="เช่น โอนจาก KBank">
+                </div>
+                <div class="form__field">
+                    <span>ไฟล์สลิป</span>
+                    <input type="file" id="slip" name="slip" accept="image/*" required>
+                </div>
+                <div class="form__actions">
+                    <button type="button" class="button button--ghost" data-open-section="dashboard">กลับหน้าหลัก</button>
+                    <button type="submit" class="button button--primary">ส่งตรวจสอบ</button>
+                </div>
+            </form>
+        </div>
+
+        <!-- Expense Panel -->
+        <div id="panel-expense" class="panel">
+            <div class="panel__header">
+                <h2>บันทึกค่าใช้จ่าย</h2>
+                <p>กรอกรายละเอียดค่าใช้จ่ายที่เกิดขึ้น</p>
+            </div>
+            <form id="expenseForm" class="form">
+                <div class="form__field">
+                    <span>จำนวนเงิน (บาท)</span>
+                    <input type="number" id="amount" name="amount" step="0.01" placeholder="0.00" required>
+                </div>
+                <div class="form__field">
+                    <span>หมวดหมู่</span>
+                    <select id="category" name="category">
+                        <option value="ค่าการตลาด">ค่าการตลาด</option>
+                        <option value="ค่าจ้างพนักงาน">ค่าจ้างพนักงาน</option>
+                        <option value="ค่าซ่อมบำรุง">ค่าซ่อมบำรุง</option>
+                        <option value="ค่าสาธารณูปโภค">ค่าสาธารณูปโภค</option>
+                        <option value="อื่นๆ">อื่นๆ</option>
+                    </select>
+                </div>
+                <div class="form__field">
+                    <span>หมายเหตุ</span>
+                    <textarea id="note" name="note" rows="3" placeholder="รายละเอียดเพิ่มเติม..."></textarea>
+                </div>
+                <div class="form__actions">
+                    <button type="button" class="button button--ghost" data-open-section="dashboard">กลับหน้าหลัก</button>
+                    <button type="submit" class="button button--primary">บันทึกค่าใช้จ่าย</button>
+                </div>
+            </form>
+        </div>
+    </main>
+
+    <script src="app.js"></script>
+</body>
+</html>
